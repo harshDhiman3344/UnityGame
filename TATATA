@@ -1,0 +1,129 @@
+using UnityEngine;
+
+public class JellyCarController : MonoBehaviour
+{
+    public float speed = 10f; // Speed of the car
+    public float turnSpeed = 100f; // Turning speed
+    public float driftFactor = 0.95f; // Drift control (lower = more slide)
+    public float suspensionRestHeight = 1f; // Default height from the ground
+    public float springForceMultiplier = 30f; // Strength of the spring (lower to prevent flying)
+    public float bounceFactor = 0.2f; // Reduced bounce to keep car grounded
+    public float damper = 5f; // Damping to stabilize suspension
+    public LayerMask groundLayer; // Ensure raycast only hits the ground
+    public float customGravity = -50f; // Stronger custom gravity for grounded behavior
+    public float brakeForce = 50f; // Force applied when braking
+
+    [Header("Stability Settings")]
+    public Vector3 centerOfMassOffset = new Vector3(0, -0.5f, 0); // Lower center of mass
+    public float stabilityForce = 50f; // Force to reduce tipping
+    public float tiltThreshold = 0.8f; // Prevent extreme tilting
+
+    private Rigidbody rb;
+    private float velocity;
+    private bool isBraking;
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody>();
+        rb.useGravity = false; // Disable Unity's default gravity
+        rb.velocity = Vector3.zero; // Ensure the car isn't moving initially
+
+        // Lower the center of mass for stability
+        rb.centerOfMass += centerOfMassOffset;
+    }
+
+    void FixedUpdate()
+    {
+        HandleSuspension();
+        HandleStability();
+        HandleMovement();
+        HandleBraking();
+    }
+
+    private void HandleMovement()
+    {
+        // Get input for movement
+        float moveInput = Input.GetAxis("Vertical"); // Forward and backward (W/S or Up/Down Arrow)
+        float turnInput = Input.GetAxis("Horizontal"); // Left and right (A/D or Left/Right Arrow)
+
+        // Apply forward force
+        if (!isBraking)
+        {
+            Vector3 moveForce = transform.forward * moveInput * speed;
+            rb.AddForce(moveForce, ForceMode.Acceleration);
+        }
+
+        // Apply steering
+        float turnAmount = turnInput * turnSpeed * Time.deltaTime;
+        transform.Rotate(Vector3.up, turnAmount);
+
+        // Apply drifting/sliding effect
+        Vector3 velocity = rb.velocity;
+        Vector3 forwardVelocity = transform.forward * Vector3.Dot(velocity, transform.forward); // Forward component
+        Vector3 rightVelocity = transform.right * Vector3.Dot(velocity, transform.right); // Sideways component
+        rb.velocity = forwardVelocity + rightVelocity * driftFactor; // Reduce sideways velocity
+    }
+
+    private void HandleBraking()
+    {
+        if (Input.GetKey(KeyCode.Space))
+        {
+            isBraking = true;
+
+            // Apply brake force by reducing velocity quickly
+            rb.velocity = Vector3.Lerp(rb.velocity, Vector3.zero, brakeForce * Time.deltaTime);
+
+            // Slight downforce when braking to stabilize
+            rb.AddForce(Vector3.down * brakeForce, ForceMode.Acceleration);
+        }
+        else
+        {
+            isBraking = false;
+        }
+    }
+
+    private void HandleSuspension()
+    {
+        // Apply custom gravity manually
+        rb.AddForce(Vector3.up * customGravity, ForceMode.Acceleration);
+
+        // Cast a ray downwards to detect the ground
+        RaycastHit hit;
+        if (Physics.Raycast(transform.position, Vector3.down, out hit, suspensionRestHeight * 2, groundLayer))
+        {
+            float currentHeight = hit.distance;
+
+            // Calculate spring force and clamp it
+            float springForce = Mathf.Clamp((suspensionRestHeight - currentHeight) * springForceMultiplier, -30f, 30f);
+
+            // Add damping to reduce oscillation
+            float dampingForce = damper * velocity;
+
+            // Final suspension force
+            float suspensionForce = springForce - dampingForce;
+            rb.AddForce(Vector3.up * suspensionForce, ForceMode.Acceleration);
+
+            // Add minor bounce (less wacky now)
+            if (springForce > 10f)
+            {
+                rb.AddForce(Vector3.up * bounceFactor, ForceMode.Impulse);
+            }
+        }
+    }
+
+    private void HandleStability()
+    {
+        // Apply a stabilizing torque if the car tilts too much
+        Vector3 localUp = transform.up; // The car's upward direction
+        float tiltAmount = Vector3.Dot(localUp, Vector3.up); // Dot product to check tilt
+
+        if (tiltAmount < tiltThreshold)
+        {
+            // Calculate stabilization torque
+            Vector3 stabilityTorque = Vector3.Cross(localUp, Vector3.up) * stabilityForce;
+
+            // Apply the torque to reduce tipping
+            rb.AddTorque(stabilityTorque, ForceMode.Acceleration);
+        }
+    }
+}
